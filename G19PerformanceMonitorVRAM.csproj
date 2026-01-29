@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net48</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <AssemblyName>G19PerformanceMonitorVRAM</AssemblyName>
+    <RootNamespace>G19PerformanceMonitorVRAM</RootNamespace>
+    <Version>2.1.2</Version>
+    <Authors>Modified for VRAM Support</Authors>
+    <Description>G19 Performance Monitor with VRAM support</Description>
+    <Copyright>Copyright © 2026</Copyright>
+    <PlatformTarget>AnyCPU</PlatformTarget>
+    <Prefer32Bit>false</Prefer32Bit>
+    <StartupObject>G19PerformanceMonitorVRAM.ProgramRefactored</StartupObject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="System.Diagnostics.PerformanceCounter" Version="8.0.0" />
+    <PackageReference Include="System.Drawing.Common" Version="8.0.0" />
+  </ItemGroup>
+
+</Project>
