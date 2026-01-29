@@ -43,6 +43,9 @@ namespace G19PerformanceMonitorVRAM
             {
                 return (uint)(size | (version << 24));
             }
+
+            [System.Runtime.InteropServices.DllImport("dxgi.dll")]
+            public static extern int CreateDXGIFactory1(ref Guid riid, out IntPtr ppFactory);
         }
 
         [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
@@ -72,6 +75,27 @@ namespace G19PerformanceMonitorVRAM
             public uint computeInstanceId;
         }
 
+        [ComImport, Guid("aec22e7e-337d-491c-a6ff-ad3222f123cb"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+        public interface IDXGIFactory
+        {
+            [PreserveSig] int EnumAdapters(uint adapter, out IntPtr ppAdapter);
+        }
+
+        [ComImport, Guid("645967A4-1392-4310-A798-8053CE3E93FD"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+        public interface IDXGIAdapter3
+        {
+            [PreserveSig] int QueryVideoMemoryInfo(uint nodeIndex, uint memorySegmentGroup, out DXGI_QUERY_VIDEO_MEMORY_INFO pVideoMemoryInfo);
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        public struct DXGI_QUERY_VIDEO_MEMORY_INFO
+        {
+            public ulong Budget;
+            public ulong CurrentUsage;
+            public ulong AvailableForReservation;
+            public ulong CurrentReservation;
+        }
+
         private PerformanceCounter cpuCounter;
         private List<PerformanceCounter> vramUsageCounters = new List<PerformanceCounter>();
         private List<PerformanceCounter> vramCapacityCounters = new List<PerformanceCounter>();
@@ -83,6 +107,7 @@ namespace G19PerformanceMonitorVRAM
 
         private readonly object _syncLock = new object();
         private float _cpuUsage;
+        private float _cpuTempCelsius;
         private float _ramUsage;
         private float _vramUsage;
         private float _gpuUsage;
@@ -101,6 +126,7 @@ namespace G19PerformanceMonitorVRAM
 
         public string Name => "G19 Performance Provider (NVML v2+DXGI+PerfCounter)";
         public float CpuUsage { get { lock (_syncLock) return _cpuUsage; } }
+        public float CpuTempCelsius { get { lock (_syncLock) return _cpuTempCelsius; } }
         public float RamUsage { get { lock (_syncLock) return _ramUsage; } } 
         public float VRamUsage { get { lock (_syncLock) return _vramUsage; } }
         public float GpuUsage { get { lock (_syncLock) return _gpuUsage; } }
@@ -114,7 +140,7 @@ namespace G19PerformanceMonitorVRAM
         public float[] GpuHistory => _gpuHistory.GetData();
 
         public IEnumerable<DiskInfo> DiskMetrics { get { lock (_syncLock) return new List<DiskInfo>(_diskMetrics); } }
-        public IEnumerable<ProcessVramInfo> TopVramConsumers { get { return new List<ProcessVramInfo>(); } }
+        public IEnumerable<ProcessVramInfo> TopVramConsumers { get { lock (_syncLock) return new List<ProcessVramInfo>(_topVramConsumers); } }
 
         public bool IsInitialized => _isInitialized;
 
@@ -166,21 +192,21 @@ namespace G19PerformanceMonitorVRAM
 
             if (_nvmlDevice == IntPtr.Zero) {
                 try {
-                    IntPtr factoryPtr;
-                    Guid factoryGuid = new Guid("7b7166ec-21c7-44ae-b21a-c9ae321ae369"); 
-                    if (NativeMethods.CreateDXGIFactory1(ref factoryGuid, out factoryPtr) == 0) {
-                        IDXGIFactory factory = (IDXGIFactory)System.Runtime.InteropServices.Marshal.GetObjectForIUnknown(factoryPtr);
-                        IntPtr adapterPtr;
-                        if (factory.EnumAdapters(0, out adapterPtr) == 0) {
-                            IntPtr adapter3Ptr;
-                            Guid adapter3Guid = new Guid("645967A4-1392-4310-A798-8053CE3E93FD");
-                            System.Runtime.InteropServices.Marshal.QueryInterface(adapterPtr, ref adapter3Guid, out adapter3Ptr);
-                            if (adapter3Ptr != IntPtr.Zero) {
-                                _dxgiAdapter = (IDXGIAdapter3)System.Runtime.InteropServices.Marshal.GetObjectForIUnknown(adapter3Ptr);
-                                Logger.Info("Successfully bound DXGI Adapter 3 for VRAM monitoring.");
-                            }
+                IntPtr factoryPtr;
+                Guid factoryGuid = new Guid("7b7166ec-21c7-44ae-b21a-c9ae321ae369"); 
+                if (NativeMethods.CreateDXGIFactory1(ref factoryGuid, out factoryPtr) == 0) {
+                    IDXGIFactory factory = (IDXGIFactory)System.Runtime.InteropServices.Marshal.GetObjectForIUnknown(factoryPtr);
+                    IntPtr adapterPtr;
+                    if (factory.EnumAdapters(0, out adapterPtr) == 0) {
+                        IntPtr adapter3Ptr;
+                        Guid adapter3Guid = new Guid("645967A4-1392-4310-A798-8053CE3E93FD");
+                        System.Runtime.InteropServices.Marshal.QueryInterface(adapterPtr, ref adapter3Guid, out adapter3Ptr);
+                        if (adapter3Ptr != IntPtr.Zero) {
+                            _dxgiAdapter = (IDXGIAdapter3)System.Runtime.InteropServices.Marshal.GetObjectForIUnknown(adapter3Ptr);
+                            Logger.Info("Successfully bound DXGI Adapter 3 for VRAM monitoring.");
                         }
                     }
+                }
                 } catch (Exception ex) {
                     Logger.Warn($"DXGI Initialization failed: {ex.Message}. Falling back to Performance Counters.");
                 }
@@ -251,102 +277,127 @@ namespace G19PerformanceMonitorVRAM
         {
             if (!_isInitialized) return;
 
-            float newCpu = 0, newRam = 0, newVram = 0, newGpu = 0, newGpuTemp = 0;
-            var newDisks = new List<DiskInfo>();
+            try 
+            {
+                float newCpu = 0, newCpuTemp = 0, newRam = 0, newVram = 0, newGpu = 0, newGpuTemp = 0;
+                var newDisks = new List<DiskInfo>();
 
-            try { if (cpuCounter != null) newCpu = Math.Min(100, Math.Max(0, cpuCounter.NextValue())); } catch { }
+                // CPU
+                try { 
+                    if (cpuCounter != null) newCpu = Math.Min(100, Math.Max(0, cpuCounter.NextValue())); 
+                    newCpuTemp = GetCpuTemperature(); 
+                } catch { }
 
-            try {
-                var memStatus = new MEMORYSTATUSEX();
-                if (NativeMethods.GlobalMemoryStatusEx(memStatus))
-                {
-                    newRam = memStatus.dwMemoryLoad;
-                    _totalRamGB = (float)memStatus.ullTotalPhys / (1024 * 1024 * 1024);
-                }
-            } catch { }
+                // RAM
+                try {
+                    var memStatus = new MEMORYSTATUSEX();
+                    if (NativeMethods.GlobalMemoryStatusEx(memStatus))
+                    {
+                        newRam = memStatus.dwMemoryLoad;
+                        _totalRamGB = (float)memStatus.ullTotalPhys / (1024 * 1024 * 1024);
+                    }
+                } catch { }
 
-            bool vramFound = false;
-            bool gpuFound = false;
-            
-            try {
-                if (_nvmlDevice != IntPtr.Zero) {
-                    nvmlMemory_v2_t memInfo = new nvmlMemory_v2_t();
-                    memInfo.version = NativeMethods.GetNvmlVersion(System.Runtime.InteropServices.Marshal.SizeOf(typeof(nvmlMemory_v2_t)), 2);
-                    
-                    if (NativeMethods.nvmlDeviceGetMemoryInfo_v2(_nvmlDevice, ref memInfo) == 0) {
-                        if (memInfo.total > 0) {
-                            newVram = (float)((double)memInfo.used / memInfo.total * 100.0);
-                            _totalVramGB = (float)memInfo.total / (1024 * 1024 * 1024);
-                            vramFound = true;
+                bool vramFound = false;
+                bool gpuFound = false;
+                
+                try {
+                    if (_nvmlDevice != IntPtr.Zero) {
+                        nvmlMemory_v2_t memInfo = new nvmlMemory_v2_t();
+                        memInfo.version = NativeMethods.GetNvmlVersion(System.Runtime.InteropServices.Marshal.SizeOf(typeof(nvmlMemory_v2_t)), 2);
+                        
+                        if (NativeMethods.nvmlDeviceGetMemoryInfo_v2(_nvmlDevice, ref memInfo) == 0) {
+                            if (memInfo.total > 0) {
+                                newVram = (float)((double)memInfo.used / memInfo.total * 100.0);
+                                _totalVramGB = (float)memInfo.total / (1024 * 1024 * 1024);
+                                vramFound = true;
+                            }
+                        }
+
+                        nvmlUtilization_t util;
+                        if (NativeMethods.nvmlDeviceGetUtilizationRates(_nvmlDevice, out util) == 0) {
+                            newGpu = util.gpu;
+                            gpuFound = true;
+                        }
+
+                        uint tempCelsius;
+                        if (NativeMethods.nvmlDeviceGetTemperature(_nvmlDevice, 0, out tempCelsius) == 0) {
+                            newGpuTemp = tempCelsius;
                         }
                     }
+                } catch (Exception ex) { Logger.Warn($"NVML Update failed: {ex.Message}"); }
 
-                    nvmlUtilization_t util;
-                    if (NativeMethods.nvmlDeviceGetUtilizationRates(_nvmlDevice, out util) == 0) {
-                        newGpu = util.gpu;
-                        gpuFound = true;
-                    }
-
-                    uint tempCelsius;
-                    if (NativeMethods.nvmlDeviceGetTemperature(_nvmlDevice, 0, out tempCelsius) == 0) {
-                        newGpuTemp = tempCelsius;
-                    }
+                if (!vramFound && _dxgiAdapter != null) {
+                    try {
+                        DXGI_QUERY_VIDEO_MEMORY_INFO dxgiMem;
+                        if (_dxgiAdapter.QueryVideoMemoryInfo(0, 0, out dxgiMem) == 0 && dxgiMem.Budget > 0) {
+                            newVram = (float)((double)dxgiMem.CurrentUsage / dxgiMem.Budget * 100.0);
+                            _totalVramGB = (float)dxgiMem.Budget / (1024 * 1024 * 1024);
+                            vramFound = true;
+                        }
+                    } catch { }
                 }
-            } catch (Exception ex) { Logger.Warn($"NVML Update failed: {ex.Message}"); }
 
-            if (!vramFound && _dxgiAdapter != null) {
+                if (!vramFound) newVram = GetVramFromCounters();
+                if (!gpuFound && gpuEngineCounters.Count > 0) {
+                    try { 
+                        float max = 0;
+                        foreach (var c in gpuEngineCounters) {
+                            float v = c.NextValue();
+                            if (v > max) max = v;
+                        }
+                        newGpu = max;
+                    } catch { }
+                }
+
+                newVram = Math.Min(100, Math.Max(0, newVram));
+                newGpu = Math.Min(100, Math.Max(0, newGpu));
+
                 try {
-                    DXGI_QUERY_VIDEO_MEMORY_INFO dxgiMem;
-                    if (_dxgiAdapter.QueryVideoMemoryInfo(0, 0, out dxgiMem) == 0 && dxgiMem.Budget > 0) {
-                        newVram = (float)((double)dxgiMem.CurrentUsage / dxgiMem.Budget * 100.0);
-                        _totalVramGB = (float)dxgiMem.Budget / (1024 * 1024 * 1024);
-                        vramFound = true;
+                    foreach (var drive in System.IO.DriveInfo.GetDrives()) {
+                        if (drive.IsReady && drive.DriveType == System.IO.DriveType.Fixed) {
+                            newDisks.Add(new DiskInfo { 
+                                Name = drive.Name.Replace("\\", ""), 
+                                FreeBytes = drive.AvailableFreeSpace, 
+                                TotalBytes = drive.TotalSize 
+                            });
+                        }
                     }
                 } catch { }
-            }
 
-            if (!vramFound) newVram = GetVramFromCounters();
-            if (!gpuFound && gpuEngineCounters.Count > 0) {
-                try { 
-                    float max = 0;
-                    foreach (var c in gpuEngineCounters) {
-                        float v = c.NextValue();
-                        if (v > max) max = v;
-                    }
-                    newGpu = max;
-                } catch { }
-            }
-
-            newVram = Math.Min(100, Math.Max(0, newVram));
-            newGpu = Math.Min(100, Math.Max(0, newGpu));
-
-            try {
-                foreach (var drive in System.IO.DriveInfo.GetDrives()) {
-                    if (drive.IsReady && drive.DriveType == System.IO.DriveType.Fixed) {
-                        newDisks.Add(new DiskInfo { 
-                            Name = drive.Name, 
-                            FreeBytes = drive.AvailableFreeSpace, 
-                            TotalBytes = drive.TotalSize 
-                        });
-                    }
+                List<ProcessVramInfo> newLlmConsumers = null;
+                if (_pollCount % 5 == 0)
+                {
+                    try { newLlmConsumers = GetLlmProcesses(); } catch { }
                 }
-            } catch { }
 
-            lock (_syncLock) {
-                _cpuUsage = newCpu;
-                _ramUsage = newRam;
-                _vramUsage = newVram;
-                _gpuUsage = newGpu;
-                _gpuTempCelsius = newGpuTemp;
-                _diskMetrics = newDisks;
-                
-                _cpuHistory.Update(newCpu);
-                _ramHistory.Update(newRam);
-                _vramHistory.Update(newVram);
-                _gpuHistory.Update(newGpu);
+                lock (_syncLock) {
+                    _cpuUsage = newCpu;
+                    _cpuTempCelsius = newCpuTemp;
+                    _ramUsage = newRam;
+                    _vramUsage = newVram;
+                    _gpuUsage = newGpu;
+                    _gpuTempCelsius = newGpuTemp;
+                    _diskMetrics = newDisks;
+                    
+                    _cpuHistory.Update(newCpu);
+                    _ramHistory.Update(newRam);
+                    _vramHistory.Update(newVram);
+                    _gpuHistory.Update(newGpu);
+
+                    if (newLlmConsumers != null)
+                        _topVramConsumers = newLlmConsumers;
+                }
             }
-
-            _pollingTimer.Start();
+            catch (Exception ex)
+            {
+                Logger.Error("UpdateMetrics loop failed", ex);
+            }
+            finally
+            {
+                _pollCount++;
+                _pollingTimer.Start(); // Resume timer
+            }
         }
 
         public void Dispose()
@@ -358,6 +409,23 @@ namespace G19PerformanceMonitorVRAM
             foreach (var c in vramUsageCounters) c?.Dispose();
             foreach (var c in vramCapacityCounters) c?.Dispose();
             if (_nvmlInitialized) NativeMethods.nvmlShutdown();
+        }
+
+        private float GetCpuTemperature()
+        {
+            try
+            {
+                using (var searcher = new System.Management.ManagementObjectSearcher(@"root\WMI", "SELECT * FROM MSAcpi_ThermalZoneTemperature"))
+                {
+                    foreach (System.Management.ManagementObject obj in searcher.Get())
+                    {
+                        double kelvin10 = Convert.ToDouble(obj["CurrentTemperature"]);
+                        return (float)(kelvin10 / 10.0 - 273.15);
+                    }
+                }
+            }
+            catch { }
+            return 0;
         }
 
         [System.Runtime.InteropServices.DllImport("kernel32.dll")]
@@ -377,6 +445,84 @@ namespace G19PerformanceMonitorVRAM
             public ulong ullAvailVirtual;
             public ulong ullAvailExtendedVirtual;
             public MEMORYSTATUSEX() { this.dwLength = (uint)System.Runtime.InteropServices.Marshal.SizeOf(typeof(MEMORYSTATUSEX)); }
+        }
+
+        private int _pollCount = 0;
+        private List<ProcessVramInfo> _topVramConsumers = new List<ProcessVramInfo>();
+        private static readonly string[] LLM_BINARIES = { "python", "python3", "llama", "ollama", "lmstudio", "vllm", "text-generation" };
+
+        private List<ProcessVramInfo> GetLlmProcesses()
+        {
+            var results = new List<ProcessVramInfo>();
+            var httpResults = GetLlmProcessesViaHttp();
+            results.AddRange(httpResults);
+            if (_nvmlDevice != IntPtr.Zero)
+            {
+                try
+                {
+                    uint infoCount = 64;
+                    nvmlProcessInfo_t[] infos = new nvmlProcessInfo_t[infoCount];
+                    if (NativeMethods.nvmlDeviceGetComputeRunningProcesses(_nvmlDevice, ref infoCount, infos) == 0)
+                        ProcessNvmlInfos(infos, infoCount, results);
+                    
+                    infoCount = 64;
+                    if (NativeMethods.nvmlDeviceGetGraphicsRunningProcesses(_nvmlDevice, ref infoCount, infos) == 0)
+                        ProcessNvmlInfos(infos, infoCount, results);
+                }
+                catch { }
+            }
+            results = results.GroupBy(p => p.Name.ToLower()).Select(g => g.First()).ToList();
+            results.Sort((a, b) => {
+                if (a.IsDead != b.IsDead) return a.IsDead ? 1 : -1;
+                return b.UsedBytes.CompareTo(a.UsedBytes);
+            });
+            return results.Take(6).ToList();
+        }
+
+        private void ProcessNvmlInfos(nvmlProcessInfo_t[] infos, uint count, List<ProcessVramInfo> results)
+        {
+            for (int i = 0; i < count; i++)
+            {
+                var info = infos[i];
+                if (info.usedGpuMemory == 0) continue;
+                try
+                {
+                    var proc = Process.GetProcessById((int)info.pid);
+                    string name = proc.ProcessName.ToLower();
+                    if (LLM_BINARIES.Any(b => name.Contains(b)))
+                    {
+                         results.Add(new ProcessVramInfo { Pid = info.pid, Name = proc.ProcessName, UsedBytes = info.usedGpuMemory });
+                    }
+                }
+                catch { }
+            }
+        }
+
+        private List<ProcessVramInfo> GetLlmProcessesViaHttp()
+        {
+            var list = new List<ProcessVramInfo>();
+            var settings = ConfigurationService.Load();
+            if (settings.LlmEndpoints == null) return list;
+            foreach (var t in settings.LlmEndpoints)
+            {
+                bool success = false;
+                try
+                {
+                    System.Net.ServicePointManager.Expect100Continue = false;
+                    var req = (System.Net.HttpWebRequest)System.Net.WebRequest.Create($"http://127.0.0.1:{t.Port}{t.Path}");
+                    req.Timeout = (t.Method == "POST") ? 1000 : 800;
+                    req.Method = t.Method ?? "GET";
+                    if (req.Method == "POST" && !string.IsNullOrEmpty(t.PostPayload))
+                    {
+                        req.ContentType = "application/json";
+                        using (var writer = new System.IO.StreamWriter(req.GetRequestStream())) { writer.Write(t.PostPayload); }
+                    }
+                    using (var resp = req.GetResponse()) { success = true; }
+                }
+                catch { }
+                list.Add(new ProcessVramInfo { Name = t.Name, UsedBytes = success ? (ulong)t.VramEstimateBytes : 0, IsDead = !success });
+            }
+            return list;
         }
     }
 }
