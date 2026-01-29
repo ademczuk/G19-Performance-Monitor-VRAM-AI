@@ -4,8 +4,8 @@ A high-visibility, single-page hardware monitoring dashboard designed specifical
 
 This modern refactor is optimized for users running local LLMs, providing real-time VRAM tracking and service status monitoring directly on your keyboard's LCD.
 
-![Dashboard Close-up](images/lcd.jpg)
-![Keyboard Context](images/keyboard.jpg)
+![Dashboard Close-up](https://raw.githubusercontent.com/ademczuk/G19-Performance-Monitor-VRAM-AI/main/images/lcd.jpg)
+![Keyboard Context](https://raw.githubusercontent.com/ademczuk/G19-Performance-Monitor-VRAM-AI/main/images/keyboard.jpg)
 
 ## Features
 
