@@ -40,7 +40,7 @@ namespace G19PerformanceMonitorVRAM
             {
                 perfMonitor = provider;
                 settings = appSettings;
-                Logger.Info("Initializing LCD Applet v3.4 (GPU Temp Support)...");
+                Logger.Info("Initializing LCD Applet v3.5 (CPU+GPU Temp Support)...");
 
                 int targetTypes = LogitechLcdSDK.LOGI_LCD_TYPE_COLOR | LogitechLcdSDK.LOGI_LCD_TYPE_MONO;
                 lcdConnection = LogitechLcdSDK.LogiLcdInit("Performance Monitor 2026", targetTypes);
@@ -113,7 +113,11 @@ namespace G19PerformanceMonitorVRAM
                 int graphH = 80; 
                 int y = 5;
 
+                // Calculate current values for labels
                 float cpu = perfMonitor.CpuUsage;
+                float cpuTempC = perfMonitor.CpuTempCelsius;
+                float cpuTempF = (cpuTempC * 9 / 5) + 32;
+
                 float ramPct = perfMonitor.RamUsage;
                 float ramUsedGB = (ramPct / 100.0f) * perfMonitor.TotalRamGB;
 
@@ -125,10 +129,16 @@ namespace G19PerformanceMonitorVRAM
                 float vramUsedGB = (vramPct / 100.0f) * perfMonitor.TotalVramGB;
                 float vramTotalGB = perfMonitor.TotalVramGB;
 
-                DrawDualGraph(margin, y, graphW, graphH, 
-                    perfMonitor.CpuHistory, COLOR_CPU, $"CPU:{cpu:F0}%", 
-                    perfMonitor.RamHistory, COLOR_RAM, $"RAM:{ramUsedGB:F1}G ({ramPct:F0}%)");
+                // LEFT: CPU (Green) & RAM (Cyan)
+                string cpuLabel = $"CPU:{cpu:F0}%";
+                string cpuTempLabel = cpuTempC > 0 ? $"{cpuTempC:F0}°C / {cpuTempF:F0}°F" : "";
 
+                DrawDualGraph(margin, y, graphW, graphH, 
+                    perfMonitor.CpuHistory, COLOR_CPU, cpuLabel, 
+                    perfMonitor.RamHistory, COLOR_RAM, $"RAM:{ramUsedGB:F1}G ({ramPct:F0}%)",
+                    cpuTempLabel);
+
+                // RIGHT: GPU (Red) & VRAM (Magenta)
                 string gpuLabel = $"GPU:{gpu:F0}%";
                 string tempLabel = $"{gpuTempC:F0}°C / {gpuTempF:F0}°F";
 
