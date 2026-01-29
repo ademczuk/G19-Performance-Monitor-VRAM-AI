@@ -4,43 +4,41 @@ A high-visibility, single-page hardware monitoring dashboard designed specifical
 
 This modern refactor is optimized for users running local LLMs, providing real-time VRAM tracking and service status monitoring directly on your keyboard's LCD.
 
-![Dashboard Close-up](https://raw.githubusercontent.com/ademczuk/G19-Performance-Monitor-VRAM-AI/main/images/lcd.jpg)
-![Keyboard Context](https://raw.githubusercontent.com/ademczuk/G19-Performance-Monitor-VRAM-AI/main/images/keyboard.jpg)
+![Dashboard Close-up](https://raw.githubusercontent.com/ademczuk/G19-Performance-Monitor-VRAM-AI/main/LCD.jpg)
+![Keyboard Context](https://raw.githubusercontent.com/ademczuk/G19-Performance-Monitor-VRAM-AI/main/Keyboard.jpg)
 
-## Features
+## Performance & Thermal Features
 
 - **Dual Detail Graphs**: 80px high history graphs for CPU/RAM and GPU/VRAM.
+- **Thermal Monitoring**: Real-time **CPU & GPU Temperature** tracking in both Celsius and Fahrenheit.
+- **Improved Stability**: Ultra-fast HTTP probing (1s timeouts) ensures the UI never freezes, even when local LLM services are unresponsive.
+
+## AI & LLM Intelligence
+
 - **VRAM Intelligence**: Decoupled trackers for dedicated GPU memory, identifying exactly how much memory your local models are consuming.
-- **AI/LLM Support**: Built-in health probes for common local AI services:
+- **"Zombie LLM" Detection**: Visual indicators (Grey/DEAD status) for services that are configured but currently unresponsive or crashed.
+- **Service Health Probes**: Built-in support for:
   - Jina Reranker
   - Qwen3 Embedding
   - FunctionGemma / Ollama / vLLM (Configurable)
-- **Comprehensive storage**: Multi-drive summary (C, D, E, F, L, etc.) in high-contrast orange.
-- **Dead/Alive Status**: Visual indicators (Cyan/Grey) for service uptime.
 
 ## Requirements
 
 - **Logitech Gaming Software v9.02.65**: (CRITICAL) This applet requires version 9.02.65 for stable LCD polling and rendering. Newer G-Hub versions may not support the legacy LCD SDK correctly.
 - **.NET Framework 4.8**: The application is built for the Windows .NET Framework 4.8.
 - **NVIDIA GPU**: Required for high-precision VRAM/Utilization via NVML. Supports fallback to DXGI/Performance Counters for other GPUs.
+- **Administrator Rights**: (Recommended) Required for WMI-based CPU temperature monitoring.
 
 ## Installation
 
 1. Download the latest `bin/Release/net48/G19PerformanceMonitorVRAM.exe`.
 2. Ensure Logitech Gaming Software 9.02.65 is running.
 3. Launch the `.exe`.
-4. (Optional) Run on Startup: Check the "Run on Startup" option in the LGS Applet settings or place a shortcut in your Startup folder.
 
 ## Configuration
 
 The application automatically creates a configuration file at:
 `%AppData%\G19PerformanceMonitor\settings.json`
-
-You can customize the following:
-
-- **LlmEndpoints**: Add your own local API endpoints (GET or POST) to track.
-- **Colors**: Adjust CPU/RAM/VRAM hex codes.
-- **Intervals**: Fine-tune polling and rendering speeds.
 
 ## Credits
 
