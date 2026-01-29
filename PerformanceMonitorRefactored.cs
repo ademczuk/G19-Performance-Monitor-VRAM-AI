@@ -161,7 +161,7 @@ namespace G19PerformanceMonitorVRAM
         private PerformanceCounter cpuCounter;
         private List<PerformanceCounter> vramUsageCounters = new List<PerformanceCounter>();
         private List<PerformanceCounter> vramCapacityCounters = new List<PerformanceCounter>();
-        private PerformanceCounter gpuLoadCounter;
+        private List<PerformanceCounter> gpuEngineCounters = new List<PerformanceCounter>();
 
         private IDXGIAdapter3 _dxgiAdapter;
         private IntPtr _nvmlDevice = IntPtr.Zero;
@@ -188,7 +188,7 @@ namespace G19PerformanceMonitorVRAM
         public float CpuUsage { get { lock (_syncLock) return _cpuUsage; } }
         public float RamUsage { get { lock (_syncLock) return _ramUsage; } } 
         public float VRamUsage { get { lock (_syncLock) return _vramUsage; } }
-        public float GpuUsage => _gpuUsage;
+        public float GpuUsage { get { lock (_syncLock) return _gpuUsage; } }
         public float TotalVramGB => _totalVramGB;
         public float TotalRamGB => _totalRamGB;
 
@@ -265,6 +265,7 @@ namespace G19PerformanceMonitorVRAM
         {
             vramUsageCounters.Clear();
             vramCapacityCounters.Clear();
+            gpuEngineCounters.Clear();
             try {
                 if (PerformanceCounterCategory.Exists("GPU Adapter Memory")) {
                     var cat = new PerformanceCounterCategory("GPU Adapter Memory");
@@ -281,14 +282,15 @@ namespace G19PerformanceMonitorVRAM
                     if (best != null) {
                         vramUsageCounters.Add(new PerformanceCounter("GPU Adapter Memory", "Dedicated Usage", best));
                         vramCapacityCounters.Add(new PerformanceCounter("GPU Adapter Memory", "Dedicated Limit", best));
-                    }
-                }
 
-                if (PerformanceCounterCategory.Exists("GPU Engine")) {
-                    var cat = new PerformanceCounterCategory("GPU Engine");
-                    var inst = cat.GetInstanceNames().FirstOrDefault(n => n.Contains("engtype_3D"));
-                    if (inst != null) {
-                        gpuLoadCounter = new PerformanceCounter("GPU Engine", "Utilization Percentage", inst);
+                        // Populate GPU Multi-Engine (Compute, 3D, Cuda, etc.) for the SAME adapter
+                        string adapterId = best.Split('_').Last(); 
+                        if (PerformanceCounterCategory.Exists("GPU Engine")) {
+                            var engineCat = new PerformanceCounterCategory("GPU Engine");
+                            foreach (var engineInst in engineCat.GetInstanceNames().Where(n => n.Contains($"_adapter_{adapterId}"))) {
+                                gpuEngineCounters.Add(new PerformanceCounter("GPU Engine", "Utilization Percentage", engineInst));
+                            }
+                        }
                     }
                 }
             } catch { }
@@ -358,8 +360,15 @@ namespace G19PerformanceMonitorVRAM
             }
 
             if (!vramFound) newVram = GetVramFromCounters();
-            if (!gpuFound && gpuLoadCounter != null) {
-                try { newGpu = gpuLoadCounter.NextValue(); } catch { }
+            if (!gpuFound && gpuEngineCounters.Count > 0) {
+                try { 
+                    float maxEngine = 0;
+                    foreach (var c in gpuEngineCounters) {
+                        try { maxEngine = Math.Max(maxEngine, c.NextValue()); } catch { }
+                    }
+                    newGpu = maxEngine;
+                    gpuFound = true;
+                } catch { }
             }
 
             newVram = Math.Min(100, Math.Max(0, newVram));
@@ -412,12 +421,9 @@ namespace G19PerformanceMonitorVRAM
         private List<ProcessVramInfo> GetLlmProcesses()
         {
             var results = new List<ProcessVramInfo>();
-            
-            // 1. HTTP Probe (Source of truth for specific services)
             var httpResults = GetLlmProcessesViaHttp();
             results.AddRange(httpResults);
 
-            // 2. NVML Scan (Discovery of other LLM processes)
             if (_nvmlDevice != IntPtr.Zero)
             {
                 try
@@ -444,21 +450,17 @@ namespace G19PerformanceMonitorVRAM
                     foreach (var n in nvmlSweep)
                     {
                         if (!results.Any(r => r.Name.Equals(n.Name, StringComparison.OrdinalIgnoreCase)))
-                        {
                             results.Add(n);
-                        }
                     }
                 }
-                catch (Exception ex) { Logger.Warn($"NVML Scan error: {ex.Message}"); }
+                catch { }
             }
 
             results = results.GroupBy(p => p.Name.ToLower()).Select(g => g.First()).ToList();
-
             results.Sort((a, b) => {
                 if (a.IsDead != b.IsDead) return a.IsDead ? 1 : -1;
                 return b.UsedBytes.CompareTo(a.UsedBytes);
             });
-
             return results.Take(6).ToList();
         }
 
@@ -524,7 +526,7 @@ namespace G19PerformanceMonitorVRAM
             _pollingTimer?.Stop();
             _pollingTimer?.Dispose();
             cpuCounter?.Dispose();
-            gpuLoadCounter?.Dispose();
+            foreach (var c in gpuEngineCounters) c?.Dispose();
             foreach (var c in vramUsageCounters) c?.Dispose();
             foreach (var c in vramCapacityCounters) c?.Dispose();
             if (_nvmlInitialized) NativeMethods.nvmlShutdown();
