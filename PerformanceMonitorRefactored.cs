@@ -412,17 +412,24 @@ namespace G19PerformanceMonitorVRAM
         private List<ProcessVramInfo> GetLlmProcesses()
         {
             var results = new List<ProcessVramInfo>();
+            
+            // 1. HTTP Probe (Source of truth for specific services)
+            var httpResults = GetLlmProcessesViaHttp();
+            results.AddRange(httpResults);
+
+            // 2. NVML Scan (Discovery of other LLM processes)
             if (_nvmlDevice != IntPtr.Zero)
             {
                 try
                 {
+                    var nvmlSweep = new List<ProcessVramInfo>();
                     uint count = 0;
                     if (NativeMethods.nvmlDeviceGetComputeRunningProcesses(_nvmlDevice, ref count, null) == 0 && count > 0)
                     {
                         var infos = new nvmlProcessInfo_t[count * 2];
                         count = (uint)infos.Length;
                         if (NativeMethods.nvmlDeviceGetComputeRunningProcesses(_nvmlDevice, ref count, infos) == 0)
-                            ProcessNvmlInfos(infos, count, results);
+                            ProcessNvmlInfos(infos, count, nvmlSweep);
                     }
                     
                     uint gCount = 0;
@@ -431,20 +438,27 @@ namespace G19PerformanceMonitorVRAM
                         var infos = new nvmlProcessInfo_t[gCount * 2];
                         gCount = (uint)infos.Length;
                         if (NativeMethods.nvmlDeviceGetGraphicsRunningProcesses(_nvmlDevice, ref gCount, infos) == 0)
-                             ProcessNvmlInfos(infos, gCount, results);
+                             ProcessNvmlInfos(infos, gCount, nvmlSweep);
                     }
-                } catch { }
+
+                    foreach (var n in nvmlSweep)
+                    {
+                        if (!results.Any(r => r.Name.Equals(n.Name, StringComparison.OrdinalIgnoreCase)))
+                        {
+                            results.Add(n);
+                        }
+                    }
+                }
+                catch (Exception ex) { Logger.Warn($"NVML Scan error: {ex.Message}"); }
             }
 
-            results = results.GroupBy(p => p.Pid).Select(g => g.First()).ToList();
+            results = results.GroupBy(p => p.Name.ToLower()).Select(g => g.First()).ToList();
 
-            if (results.Count == 0)
-            {
-                var httpResults = GetLlmProcessesViaHttp();
-                results.AddRange(httpResults);
-            }
+            results.Sort((a, b) => {
+                if (a.IsDead != b.IsDead) return a.IsDead ? 1 : -1;
+                return b.UsedBytes.CompareTo(a.UsedBytes);
+            });
 
-            results.Sort((a, b) => b.UsedBytes.CompareTo(a.UsedBytes));
             return results.Take(6).ToList();
         }
 

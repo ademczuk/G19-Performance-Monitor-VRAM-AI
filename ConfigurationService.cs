@@ -51,12 +51,27 @@ namespace G19PerformanceMonitorVRAM
 
         public static AppSettings Load()
         {
-            if (!File.Exists(ConfigPath)) return new AppSettings();
+            if (!File.Exists(ConfigPath))
+            {
+                var defaults = new AppSettings();
+                Save(defaults);
+                return defaults;
+            }
+
             try {
+                AppSettings settings;
                 using (var fs = File.OpenRead(ConfigPath)) {
                     var serializer = new DataContractJsonSerializer(typeof(AppSettings));
-                    return (AppSettings)serializer.ReadObject(fs);
+                    settings = (AppSettings)serializer.ReadObject(fs);
                 }
+
+                if (settings.LlmEndpoints == null || settings.LlmEndpoints.Count == 0)
+                {
+                    Logger.Info("Config found but LlmEndpoints missing/empty. Adding defaults.");
+                    settings.LlmEndpoints = new AppSettings().LlmEndpoints;
+                    Save(settings); 
+                }
+                return settings;
             } catch { return new AppSettings(); }
         }
 
