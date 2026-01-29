@@ -420,11 +420,27 @@ namespace G19PerformanceMonitorVRAM
                     foreach (System.Management.ManagementObject obj in searcher.Get())
                     {
                         double kelvin10 = Convert.ToDouble(obj["CurrentTemperature"]);
-                        return (float)(kelvin10 / 10.0 - 273.15);
+                        float c = (float)(kelvin10 / 10.0 - 273.15);
+                        if (c > 0) return c;
                     }
                 }
             }
-            catch { }
+            catch (Exception ex) { Logger.Warn("WMI ThermalZone (root/WMI) failed: " + ex.Message); }
+
+            try
+            {
+                using (var searcher = new System.Management.ManagementObjectSearcher(@"root\CIMV2", "SELECT * FROM Win32_PerfFormattedData_Counters_ThermalZoneInformation"))
+                {
+                    foreach (System.Management.ManagementObject obj in searcher.Get())
+                    {
+                        double temp = Convert.ToDouble(obj["HighPrecisionTemperature"]);
+                        if (temp > 2000) return (float)(temp / 10.0 - 273.15);
+                        if (temp > 0) return (float)temp;
+                    }
+                }
+            }
+            catch (Exception ex) { Logger.Warn("WMI ThermalZone (root/CIMV2) failed: " + ex.Message); }
+
             return 0;
         }
 
