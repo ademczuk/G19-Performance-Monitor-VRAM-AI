@@ -51,6 +51,7 @@ namespace G19PerformanceMonitorVRAM
         /// Latest GPU Utilization percentage.
         /// </summary>
         float GpuUsage { get; }
+        float GpuTempCelsius { get; }
 
         float TotalVramGB { get; }
         float TotalRamGB { get; }
@@ -70,6 +71,7 @@ namespace G19PerformanceMonitorVRAM
 
         /// <summary>
         /// Triggers a refresh of all metrics. 
+        /// In an async implementation, this might just trigger the background thread.
         /// </summary>
         void Update();
     }
