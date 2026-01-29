@@ -1,8 +1,11 @@
 # G19 Performance Monitor - VRAM & AI Edition
 
-A high-visibility, single-page hardware monitoring dashboard designed specifically for the legendary **Logitech G19** (and G19s) keyboards. 
+A high-visibility, single-page hardware monitoring dashboard designed specifically for the legendary **Logitech G19** (and G19s) keyboards.
 
 This modern refactor is optimized for users running local LLMs, providing real-time VRAM tracking and service status monitoring directly on your keyboard's LCD.
+
+![Dashboard Close-up](images/lcd.jpg)
+![Keyboard Context](images/keyboard.jpg)
 
 ## Features
 
@@ -23,7 +26,7 @@ This modern refactor is optimized for users running local LLMs, providing real-t
 
 ## Installation
 
-1. Download the latest source and build or use the binary (if provided in Releases).
+1. Download the latest `bin/Release/net48/G19PerformanceMonitorVRAM.exe`.
 2. Ensure Logitech Gaming Software 9.02.65 is running.
 3. Launch the `.exe`.
 4. (Optional) Run on Startup: Check the "Run on Startup" option in the LGS Applet settings or place a shortcut in your Startup folder.
@@ -34,6 +37,7 @@ The application automatically creates a configuration file at:
 `%AppData%\G19PerformanceMonitor\settings.json`
 
 You can customize the following:
+
 - **LlmEndpoints**: Add your own local API endpoints (GET or POST) to track.
 - **Colors**: Adjust CPU/RAM/VRAM hex codes.
 - **Intervals**: Fine-tune polling and rendering speeds.
