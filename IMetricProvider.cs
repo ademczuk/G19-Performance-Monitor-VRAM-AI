@@ -36,6 +36,7 @@ namespace G19PerformanceMonitorVRAM
         /// Latest CPU Usage percentage.
         /// </summary>
         float CpuUsage { get; }
+        float CpuTempCelsius { get; }
 
         /// <summary>
         /// Latest RAM Usage percentage.
