@@ -10,13 +10,14 @@ This modern refactor is optimized for users running local LLMs, providing real-t
 ## Performance & Thermal Features
 
 - **Dual Detail Graphs**: 80px high history graphs for CPU/RAM and GPU/VRAM.
-- **Thermal Monitoring**: Real-time **CPU & GPU Temperature** tracking in both Celsius and Fahrenheit.
+- **Thermal Monitoring**: Real-time **CPU & GPU Temperature** tracking. 
+  - *Note: CPU temperature on Ryzen/Core systems typically requires running the app as **Administrator**.*
 - **Improved Stability**: Ultra-fast HTTP probing (1s timeouts) ensures the UI never freezes, even when local LLM services are unresponsive.
 
 ## AI & LLM Intelligence
 
 - **VRAM Intelligence**: Decoupled trackers for dedicated GPU memory, identifying exactly how much memory your local models are consuming.
-- **"Zombie LLM" Detection**: Visual indicators (Grey/DEAD status) for services that are configured but currently unresponsive or crashed.
+- **Zombie LLM Detection**: Visual indicators (Grey/DEAD status) for services that are configured but currently unresponsive or crashed.
 - **Service Health Probes**: Built-in support for:
   - Jina Reranker
   - Qwen3 Embedding
